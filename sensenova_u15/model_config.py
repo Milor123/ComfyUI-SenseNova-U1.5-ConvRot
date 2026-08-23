@@ -101,9 +101,12 @@ class SenseNovaModelConfig(comfy.supported_models_base.BASE):
 
     def get_model(self, state_dict, prefix="", device=None):
         if any(key.endswith(".comfy_quant") for key in state_dict):
-            # Quantized checkpoints (int8_tensorwise + convrot) use ComfyUI's native
-            # mixed-precision ops; detection mirrors comfy.utils.detect_layer_quantization.
-            self.quant_config = {"mixed_ops": True}
+            # Quantized checkpoints need convrot-aware forwards: ComfyUI's
+            # generic dispatch skips the activation rotation, so route through
+            # our bridge instead of stock mixed_precision_ops.
+            from .quant_bridge import make_sensenova_quant_ops
+
+            self.custom_operations = make_sensenova_quant_ops()
         return SenseNovaBaseModel(self, device=device)
 
     def process_unet_state_dict(self, state_dict):
