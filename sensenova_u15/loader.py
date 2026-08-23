@@ -6,11 +6,10 @@ from safetensors import safe_open
 
 import comfy.model_management
 import comfy.model_patcher
-import comfy.ops
 import comfy.sd
 import comfy.utils
 
-from .model import HIDDEN_SIZE, NUM_LAYERS, VOCAB_SIZE, SenseNovaU15
+from .model import NUM_LAYERS
 from .model_config import SenseNovaModelConfig
 
 
@@ -70,13 +69,12 @@ def _is_quant_candidate(name, shape):
 
 
 def _checkpoint_contract(quantized=False, quant_format="int8_tensorwise"):
-    model = SenseNovaU15(
-        device=torch.device("meta"),
-        dtype=torch.bfloat16,
-        operations=comfy.ops.disable_weight_init,
-    )
-    contract = {name: tuple(tensor.shape) for name, tensor in model.state_dict().items()}
-    contract["language_model.lm_head.weight"] = (VOCAB_SIZE, HIDDEN_SIZE)
+    # Static table generated from the official checkpoint header; building a
+    # meta model here proved fragile inside full ComfyUI sessions where other
+    # extensions patch module construction.
+    from .checkpoint_contract import BASE_CONTRACT
+
+    contract = dict(BASE_CONTRACT)
     if not quantized:
         return contract
     # Quantized checkpoints keep every base key but store rank-2 linear weights
