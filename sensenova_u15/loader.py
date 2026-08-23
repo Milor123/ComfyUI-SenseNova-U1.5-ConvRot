@@ -69,7 +69,7 @@ def _is_quant_candidate(name, shape):
     )
 
 
-def _checkpoint_contract(quantized=False):
+def _checkpoint_contract(quantized=False, quant_format="int8_tensorwise"):
     model = SenseNovaU15(
         device=torch.device("meta"),
         dtype=torch.bfloat16,
@@ -80,19 +80,39 @@ def _checkpoint_contract(quantized=False):
     if not quantized:
         return contract
     # Quantized checkpoints keep every base key but store rank-2 linear weights
-    # as int8 plus fp32 per-row scales and a uint8 JSON config tensor. Sidecar
-    # keys REPLACE the trailing ".weight" segment (converter convention).
+    # packed plus fp32 scales and a uint8 JSON config tensor. Sidecar keys
+    # REPLACE the trailing ".weight" segment (converter convention).
     quant_contract = {}
     for name, shape in contract.items():
         if _is_quant_candidate(name, shape):
+            out_f, in_f = shape
             stem = name[: -len(".weight")]
-            quant_contract[name] = shape
-            quant_contract[stem + ".weight_scale"] = (shape[0], 1)
+            # Packed W4 halves K; int8 keeps full shape.
+            quant_contract[name] = (out_f, in_f // 2) if quant_format == "convrot_w4a4" else shape
+            quant_contract[stem + ".weight_scale"] = (
+                (out_f,) if quant_format == "convrot_w4a4" else (out_f, 1)
+            )
             # JSON payload length varies per layer; only dtype is pinned.
             quant_contract[stem + ".comfy_quant"] = None
         else:
             quant_contract[name] = shape
     return quant_contract
+
+
+def _detect_quant_format(checkpoint):
+    """Peek the first comfy_quant JSON payload; None means not quantized."""
+    import json
+
+    for key in checkpoint.keys():
+        if not key.endswith(".comfy_quant"):
+            continue
+        try:
+            payload = checkpoint.get_tensor(key)
+            conf = json.loads(bytes(payload.numpy()).decode("utf-8"))
+            return conf.get("format")
+        except Exception:
+            return None
+    return None
 
 
 def _expected_storage_dtype(name, variant, quantized, quant_weight_stems):
@@ -128,8 +148,9 @@ def _storage_dtype(name, variant="final"):
 def _validate_checkpoint_header(checkpoint):
     variant = _validate_metadata(checkpoint.metadata() or {})
     actual_keys = set(checkpoint.keys())
-    quantized = any(key.endswith(".comfy_quant") for key in actual_keys)
-    contract = _checkpoint_contract(quantized=quantized)
+    quant_format = _detect_quant_format(checkpoint)
+    quantized = quant_format is not None
+    contract = _checkpoint_contract(quantized=quantized, quant_format=quant_format)
     quant_weight_stems = {
         name[: -len(".weight")]
         for name, shape in contract.items()
