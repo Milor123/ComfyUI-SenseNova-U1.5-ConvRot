@@ -160,7 +160,11 @@ def _validate_checkpoint_header(checkpoint):
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)[:5]
         unexpected = sorted(actual_keys - expected_keys)[:5]
-        raise ValueError(f"SenseNova-U1.5 checkpoint key mismatch: missing={missing}, unexpected={unexpected}")
+        raise ValueError(
+            f"SenseNova-U1.5 checkpoint key mismatch: quant_format={quant_format}, "
+            f"contract_keys={len(expected_keys)}, file_keys={len(actual_keys)}, "
+            f"missing={missing}, unexpected={unexpected}"
+        )
     for name, shape in contract.items():
         tensor = checkpoint.get_slice(name)
         actual_shape = tuple(tensor.get_shape())
