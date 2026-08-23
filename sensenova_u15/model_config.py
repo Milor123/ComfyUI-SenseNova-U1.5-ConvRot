@@ -100,6 +100,10 @@ class SenseNovaModelConfig(comfy.supported_models_base.BASE):
     optimizations = {"fp8": False}
 
     def get_model(self, state_dict, prefix="", device=None):
+        if any(key.endswith(".comfy_quant") for key in state_dict):
+            # Quantized checkpoints (int8_tensorwise + convrot) use ComfyUI's native
+            # mixed-precision ops; detection mirrors comfy.utils.detect_layer_quantization.
+            self.quant_config = {"mixed_ops": True}
         return SenseNovaBaseModel(self, device=device)
 
     def process_unet_state_dict(self, state_dict):

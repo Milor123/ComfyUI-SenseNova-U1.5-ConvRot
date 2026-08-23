@@ -57,7 +57,19 @@ def _validate_metadata(metadata):
     raise ValueError("SenseNova-U1.5 checkpoint is not a supported Final or SFT model")
 
 
-def _checkpoint_contract():
+_QUANT_EXCLUDED_SUBSTRINGS = ("norm", "embed_tokens", "lm_head")
+
+
+def _is_quant_candidate(name, shape):
+    """Rank-2 linear weights that convert_to_quant's sensenova policy quantizes."""
+    return (
+        len(shape) == 2
+        and name.endswith(".weight")
+        and not any(token in name for token in _QUANT_EXCLUDED_SUBSTRINGS)
+    )
+
+
+def _checkpoint_contract(quantized=False):
     model = SenseNovaU15(
         device=torch.device("meta"),
         dtype=torch.bfloat16,
@@ -65,7 +77,33 @@ def _checkpoint_contract():
     )
     contract = {name: tuple(tensor.shape) for name, tensor in model.state_dict().items()}
     contract["language_model.lm_head.weight"] = (VOCAB_SIZE, HIDDEN_SIZE)
-    return contract
+    if not quantized:
+        return contract
+    # Quantized checkpoints keep every base key but store rank-2 linear weights
+    # as int8 plus fp32 per-row scales and a uint8 JSON config tensor. Sidecar
+    # keys REPLACE the trailing ".weight" segment (converter convention).
+    quant_contract = {}
+    for name, shape in contract.items():
+        if _is_quant_candidate(name, shape):
+            stem = name[: -len(".weight")]
+            quant_contract[name] = shape
+            quant_contract[stem + ".weight_scale"] = (shape[0], 1)
+            # JSON payload length varies per layer; only dtype is pinned.
+            quant_contract[stem + ".comfy_quant"] = None
+        else:
+            quant_contract[name] = shape
+    return quant_contract
+
+
+def _expected_storage_dtype(name, variant, quantized, quant_weight_stems):
+    if quantized:
+        if name.endswith(".comfy_quant"):
+            return "U8"
+        if name.endswith(".weight_scale"):
+            return "F32"
+        if name.endswith(".weight") and name[: -len(".weight")] in quant_weight_stems:
+            return "I8"
+    return _storage_dtype(name, variant)
 
 
 def _storage_dtype(name, variant="final"):
@@ -89,8 +127,14 @@ def _storage_dtype(name, variant="final"):
 
 def _validate_checkpoint_header(checkpoint):
     variant = _validate_metadata(checkpoint.metadata() or {})
-    contract = _checkpoint_contract()
     actual_keys = set(checkpoint.keys())
+    quantized = any(key.endswith(".comfy_quant") for key in actual_keys)
+    contract = _checkpoint_contract(quantized=quantized)
+    quant_weight_stems = {
+        name[: -len(".weight")]
+        for name, shape in contract.items()
+        if shape is not None and _is_quant_candidate(name, shape)
+    }
     expected_keys = set(contract)
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)[:5]
@@ -99,9 +143,9 @@ def _validate_checkpoint_header(checkpoint):
     for name, shape in contract.items():
         tensor = checkpoint.get_slice(name)
         actual_shape = tuple(tensor.get_shape())
-        if actual_shape != shape:
+        if shape is not None and actual_shape != shape:
             raise ValueError(f"SenseNova-U1.5 checkpoint shape mismatch for {name}: {actual_shape} != {shape}")
-        expected_dtype = _storage_dtype(name, variant)
+        expected_dtype = _expected_storage_dtype(name, variant, quantized, quant_weight_stems)
         if tensor.get_dtype() != expected_dtype:
             raise ValueError(
                 f"SenseNova-U1.5 checkpoint dtype mismatch for {name}: {tensor.get_dtype()} != {expected_dtype}"
