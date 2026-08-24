@@ -9,16 +9,24 @@ Run inside the ComfyUI venv:
 """
 import argparse
 import json
+import re
 import struct
 from pathlib import Path
 
 import torch
 from safetensors.torch import save_file
 
+from comfy_kitchen.backends.eager.convrot_w4a4 import _build_hadamard
 from comfy_kitchen.tensor.convrot_w4a4 import TensorCoreConvRotW4A4Layout
 
 # Mirrors sensenova_u15/loader.py::_is_quant_candidate policy.
 _EXCLUDED = ("norm", "embed_tokens", "lm_head")
+
+# Mixed-mode policy (mirrors QuantizationToolkit's architecture-aware tiers):
+# write-back projections (o_proj, down_proj) and the fm conditioning MLPs stay
+# at convrot int8; the bulk goes to convrot int4.
+_INT8_STEMS = ("o_proj", "down_proj")
+_INT8_EMBEDDERS = ("fm_modules.timestep_embedder", "fm_modules.noise_scale_embedder")
 
 _DTYPES = {
     "BF16": torch.bfloat16,
@@ -62,6 +70,18 @@ def _is_quant_candidate(name, tensor):
     )
 
 
+def _quantize_int8_convrot(w_fp32, groupsize, device):
+    """Row-wise symmetric int8 with the Hadamard fold folded in (R1 layout)."""
+    h = _build_hadamard(groupsize, device, torch.float32)
+    out_f, in_f = w_fp32.shape
+    ng = in_f // groupsize
+    w_rot = torch.einsum("ong,gh->onh", w_fp32.view(out_f, ng, groupsize),
+                         h.t()).reshape(out_f, in_f)
+    scale = w_rot.abs().amax(dim=1, keepdim=True).clamp_min(1e-12) / 127.0
+    q = (w_rot / scale).round().clamp(-127, 127).to(torch.int8)
+    return q, scale
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-i", "--input", required=True)
@@ -69,40 +89,63 @@ def main():
     parser.add_argument("--device", default="cpu", help="compute device for rotation math")
     parser.add_argument("--convrot-groupsize", type=int, default=256)
     parser.add_argument("--linear-dtype", choices=["int4", "int8"], default="int4",
-                        help="activation precision for the kernel: int4 (W4A4, fastest/coarsest) "
-                             "or int8 (W4A8, much better quality, same 4-bit weights)")
+                        help="MMA accumulation precision for w4a4 layers (activations are "
+                             "always int4 in this format)")
+    parser.add_argument("--mode", choices=["mixed", "all-w4a4"], default="mixed",
+                        help="mixed: o_proj/down_proj + fm embedders at convrot int8, "
+                             "rest at w4a4 (official quality recipe). all-w4a4: everything int4.")
     args = parser.parse_args()
 
     device = torch.device(args.device)
     dst = Path(args.output)
 
     out = {}
-    n_quant, n_copy, n_total = 0, 0, 0
+    counts = {"w4a4": 0, "int8": 0, "copy": 0}
+    n_total = 0
     for key, tensor in _iter_tensors(args.input):
         n_total += 1
         if not _is_quant_candidate(key, tensor):
             out[key] = tensor
-            n_copy += 1
+            counts["copy"] += 1
             continue
         stem = key[: -len(".weight")]
         w = tensor.to(device=device, dtype=torch.float32)
-        qdata, params = TensorCoreConvRotW4A4Layout.quantize(
-            w, convrot_groupsize=args.convrot_groupsize, stochastic_rounding=0
+
+        use_int8 = args.mode == "mixed" and (
+            any(tok in key for tok in _INT8_STEMS)
+            or any(key.startswith(pfx) for pfx in _INT8_EMBEDDERS)
         )
-        conf = {"format": "convrot_w4a4", "convrot_groupsize": args.convrot_groupsize}
-        if args.linear_dtype != "int4":
-            conf["linear_dtype"] = args.linear_dtype
-        out[stem + ".weight"] = qdata.to("cpu")
-        out[stem + ".weight_scale"] = params.scale.to("cpu").to(torch.float32).reshape(-1)
+        if use_int8:
+            qdata, scale = _quantize_int8_convrot(w, args.convrot_groupsize, device)
+            conf = {
+                "format": "int8_tensorwise",
+                "orig_dtype": "torch.bfloat16",
+                "convrot": True,
+                "convrot_groupsize": args.convrot_groupsize,
+                "per_row": True,
+            }
+            out[stem + ".weight"] = qdata.to("cpu")
+            out[stem + ".weight_scale"] = scale.to("cpu").to(torch.float32)
+            fmt_key = "int8"
+        else:
+            qdata, params = TensorCoreConvRotW4A4Layout.quantize(
+                w, convrot_groupsize=args.convrot_groupsize, stochastic_rounding=0
+            )
+            conf = {"format": "convrot_w4a4", "convrot_groupsize": args.convrot_groupsize}
+            if args.linear_dtype != "int4":
+                conf["linear_dtype"] = args.linear_dtype
+            out[stem + ".weight"] = qdata.to("cpu")
+            out[stem + ".weight_scale"] = params.scale.to("cpu").to(torch.float32).reshape(-1)
+            fmt_key = "w4a4"
         out[stem + ".comfy_quant"] = torch.tensor(
             list(json.dumps(conf).encode("utf-8")), dtype=torch.uint8
         )
-        n_quant += 1
+        counts[fmt_key] += 1
         if n_total % 100 == 0:
-            print(f"[{n_total}] quantized={n_quant} copied={n_copy}", flush=True)
+            print(f"[{n_total}] {counts}", flush=True)
 
     save_file(out, str(dst))
-    print(f"done: {n_quant} weights packed to convrot_w4a4, {n_copy} passthrough -> {dst}")
+    print(f"done: {counts} -> {dst}")
 
 
 if __name__ == "__main__":

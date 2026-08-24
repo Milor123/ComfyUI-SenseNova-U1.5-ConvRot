@@ -68,28 +68,33 @@ def _is_quant_candidate(name, shape):
     )
 
 
-def _checkpoint_contract(quantized=False, quant_format="int8_tensorwise"):
+def _checkpoint_contract(quant_formats=None):
     # Static table generated from the official checkpoint header; building a
     # meta model here proved fragile inside full ComfyUI sessions where other
     # extensions patch module construction.
     from .checkpoint_contract import BASE_CONTRACT
 
     contract = dict(BASE_CONTRACT)
-    if not quantized:
+    if not quant_formats:
         return contract
     # Quantized checkpoints keep every base key but store rank-2 linear weights
     # packed plus fp32 scales and a uint8 JSON config tensor. Sidecar keys
-    # REPLACE the trailing ".weight" segment (converter convention).
+    # REPLACE the trailing ".weight" segment (converter convention). Formats
+    # are per-layer (mixed int8/w4a4 checkpoints are supported).
+    quant_formats = quant_formats or {}
     quant_contract = {}
     for name, shape in contract.items():
         if _is_quant_candidate(name, shape):
             out_f, in_f = shape
             stem = name[: -len(".weight")]
-            # Packed W4 halves K; int8 keeps full shape.
-            quant_contract[name] = (out_f, in_f // 2) if quant_format == "convrot_w4a4" else shape
-            quant_contract[stem + ".weight_scale"] = (
-                (out_f,) if quant_format == "convrot_w4a4" else (out_f, 1)
-            )
+            fmt = quant_formats.get(stem, "int8_tensorwise")
+            if fmt == "convrot_w4a4":
+                # Packed W4 halves K; per-row scales are flat (out,).
+                quant_contract[name] = (out_f, in_f // 2)
+                quant_contract[stem + ".weight_scale"] = (out_f,)
+            else:
+                quant_contract[name] = shape
+                quant_contract[stem + ".weight_scale"] = (out_f, 1)
             # JSON payload length varies per layer; only dtype is pinned.
             quant_contract[stem + ".comfy_quant"] = None
         else:
@@ -97,20 +102,21 @@ def _checkpoint_contract(quantized=False, quant_format="int8_tensorwise"):
     return quant_contract
 
 
-def _detect_quant_format(checkpoint):
-    """Peek the first comfy_quant JSON payload; None means not quantized."""
+def _read_quant_formats(checkpoint):
+    """Per-layer format map from every comfy_quant payload; empty = not quantized."""
     import json
 
+    formats = {}
     for key in checkpoint.keys():
         if not key.endswith(".comfy_quant"):
             continue
         try:
             payload = checkpoint.get_tensor(key)
             conf = json.loads(bytes(payload.numpy()).decode("utf-8"))
-            return conf.get("format")
+            formats[key[: -len(".comfy_quant")]] = conf.get("format")
         except Exception:
-            return None
-    return None
+            return {}
+    return formats
 
 
 def _expected_storage_dtype(name, variant, quantized, quant_weight_stems):
@@ -146,9 +152,9 @@ def _storage_dtype(name, variant="final"):
 def _validate_checkpoint_header(checkpoint):
     variant = _validate_metadata(checkpoint.metadata() or {})
     actual_keys = set(checkpoint.keys())
-    quant_format = _detect_quant_format(checkpoint)
-    quantized = quant_format is not None
-    contract = _checkpoint_contract(quantized=quantized, quant_format=quant_format)
+    quant_formats = _read_quant_formats(checkpoint)
+    quantized = bool(quant_formats)
+    contract = _checkpoint_contract(quant_formats=quant_formats)
     quant_weight_stems = {
         name[: -len(".weight")]
         for name, shape in contract.items()
@@ -159,7 +165,7 @@ def _validate_checkpoint_header(checkpoint):
         missing = sorted(expected_keys - actual_keys)[:5]
         unexpected = sorted(actual_keys - expected_keys)[:5]
         raise ValueError(
-            f"SenseNova-U1.5 checkpoint key mismatch: quant_format={quant_format}, "
+            f"SenseNova-U1.5 checkpoint key mismatch: quant_formats={sorted(set(quant_formats.values()))}, "
             f"contract_keys={len(expected_keys)}, file_keys={len(actual_keys)}, "
             f"missing={missing}, unexpected={unexpected}"
         )

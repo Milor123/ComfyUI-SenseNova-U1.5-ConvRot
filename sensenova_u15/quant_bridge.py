@@ -60,21 +60,23 @@ def make_sensenova_quant_ops():
             fmt = getattr(self, "quant_format", None)
             if isinstance(weight, QuantizedTensor):
                 if fmt == "convrot_w4a4":
-                    # Kitchen's W4A4 linear rotates activations internally and
-                    # matches original-basis math within int4 quantization noise.
-                    from comfy_kitchen.tensor.convrot_w4a4 import (
-                        TensorCoreConvRotW4A4Layout,
-                        convrot_w4a4_linear,
+                    # Kitchen's W4A4 linear rotates activations internally.
+                    # The EAGER implementation is forced deliberately: the CUDA
+                    # kernel diverges from eager by ~15% per call on this
+                    # build, which compounds destructively across 42 layers.
+                    from comfy_kitchen.backends.eager.convrot_w4a4 import (
+                        convrot_w4a4_linear as eager_w4a4_linear,
                     )
+                    from comfy_kitchen.tensor.convrot_w4a4 import TensorCoreConvRotW4A4Layout
 
                     qdata, wscales = TensorCoreConvRotW4A4Layout.get_plain_tensors(weight)
-                    out = convrot_w4a4_linear(
+                    out = eager_w4a4_linear(
                         input, qdata, wscales, bias,
                         convrot_groupsize=gs,
                         quant_group_size=int(getattr(weight._params, "quant_group_size", 64)),
                         linear_dtype=getattr(weight._params, "linear_dtype", "int4"),
                     )
-                    _warn_nan(getattr(self, "_sensenova_name", "?"), "w4a4 kernel", out)
+                    _warn_nan(getattr(self, "_sensenova_name", "?"), "w4a4 eager", out)
                     return out
                 # NOTE: this comfy-kitchen build accepts convrot kwargs on
                 # ck.int8_linear but ignores them, so int8 goes through the
