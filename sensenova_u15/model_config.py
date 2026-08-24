@@ -100,7 +100,11 @@ class SenseNovaModelConfig(comfy.supported_models_base.BASE):
     optimizations = {"fp8": False}
 
     def get_model(self, state_dict, prefix="", device=None):
-        if any(key.endswith(".comfy_quant") for key in state_dict):
+        import os
+
+        if any(key.endswith(".comfy_quant") for key in state_dict) and not os.environ.get(
+            "SENSENOVA_NO_BRIDGE"
+        ):
             # Quantized checkpoints need convrot-aware forwards: ComfyUI's
             # generic dispatch skips the activation rotation, so route through
             # our bridge instead of stock mixed_precision_ops.

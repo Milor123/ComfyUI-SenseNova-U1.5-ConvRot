@@ -64,13 +64,15 @@ def make_sensenova_quant_ops():
                 # exact float path below instead.
 
             # Exact path: rotate activations into the folded basis, then a
-            # plain linear against the (possibly materialized) rotated weight.
+            # plain linear against the rotated weight. Dequantization is done
+            # MANUALLY from raw qdata/scales: QuantizedTensor.dequantize()
+            # dispatch is unreliable on CPU in current builds (wrong results
+            # or native crashes) and weight streaming hits CPU constantly.
             weight_float = weight
             if isinstance(weight, QuantizedTensor):
-                weight_float = weight.dequantize()
-            return torch.nn.functional.linear(
-                _rotate_input(input, gs), weight_float.to(dtype=input.dtype), bias
-            )
+                qdata, scale = TensorWiseINT8Layout.get_plain_tensors(weight)
+                weight_float = qdata.to(input.dtype) * scale.to(input.dtype).reshape(-1, 1)
+            return torch.nn.functional.linear(_rotate_input(input, gs), weight_float, bias)
 
     class Ops(base):
         Linear = _Linear
