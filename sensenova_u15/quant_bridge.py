@@ -14,6 +14,19 @@ import comfy.ops
 import comfy.quant_ops
 from comfy.quant_ops import QuantizedTensor, TensorWiseINT8Layout
 
+_REPORTED_NAN = set()
+
+
+def _warn_nan(name, where, out):
+    import logging
+
+    if (torch.isnan(out).any() or torch.isinf(out).any()) and name not in _REPORTED_NAN:
+        _REPORTED_NAN.add(name)
+        logging.warning(
+            f"[sensenova-quant] NaN/Inf detected in {where} output of '{name}' "
+            f"(first occurrence; further occurrences suppressed)"
+        )
+
 
 def _rotate_input(x, group_size):
     from comfy_kitchen.backends.eager.convrot_w4a4 import _build_hadamard
@@ -29,6 +42,7 @@ def make_sensenova_quant_ops():
 
     class _Linear(base.Linear):
         def _load_from_state_dict(self, *args, **kwargs):
+            prefix = args[1] if len(args) > 1 else kwargs.get("prefix", "")
             super()._load_from_state_dict(*args, **kwargs)
             params = getattr(self.weight, "_params", None)
             fmt = getattr(self, "quant_format", None)
@@ -36,6 +50,7 @@ def make_sensenova_quant_ops():
                 getattr(params, "convrot", False) or fmt == "convrot_w4a4"
             )
             self._sensenova_convrot_gs = int(getattr(params, "convrot_groupsize", 256)) if rotated else None
+            self._sensenova_name = prefix.rstrip(".")
 
         def _forward(self, input, weight, bias):
             gs = getattr(self, "_sensenova_convrot_gs", None)
@@ -53,12 +68,14 @@ def make_sensenova_quant_ops():
                     )
 
                     qdata, wscales = TensorCoreConvRotW4A4Layout.get_plain_tensors(weight)
-                    return convrot_w4a4_linear(
+                    out = convrot_w4a4_linear(
                         input, qdata, wscales, bias,
                         convrot_groupsize=gs,
                         quant_group_size=int(getattr(weight._params, "quant_group_size", 64)),
                         linear_dtype=getattr(weight._params, "linear_dtype", "int4"),
                     )
+                    _warn_nan(getattr(self, "_sensenova_name", "?"), "w4a4 kernel", out)
+                    return out
                 # NOTE: this comfy-kitchen build accepts convrot kwargs on
                 # ck.int8_linear but ignores them, so int8 goes through the
                 # exact float path below instead.
