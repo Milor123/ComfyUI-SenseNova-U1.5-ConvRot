@@ -68,6 +68,9 @@ def main():
     parser.add_argument("-o", "--output", required=True)
     parser.add_argument("--device", default="cpu", help="compute device for rotation math")
     parser.add_argument("--convrot-groupsize", type=int, default=256)
+    parser.add_argument("--linear-dtype", choices=["int4", "int8"], default="int4",
+                        help="activation precision for the kernel: int4 (W4A4, fastest/coarsest) "
+                             "or int8 (W4A8, much better quality, same 4-bit weights)")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -87,6 +90,8 @@ def main():
             w, convrot_groupsize=args.convrot_groupsize, stochastic_rounding=0
         )
         conf = {"format": "convrot_w4a4", "convrot_groupsize": args.convrot_groupsize}
+        if args.linear_dtype != "int4":
+            conf["linear_dtype"] = args.linear_dtype
         out[stem + ".weight"] = qdata.to("cpu")
         out[stem + ".weight_scale"] = params.scale.to("cpu").to(torch.float32).reshape(-1)
         out[stem + ".comfy_quant"] = torch.tensor(
