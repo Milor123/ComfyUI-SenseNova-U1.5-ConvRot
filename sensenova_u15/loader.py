@@ -92,6 +92,13 @@ def _checkpoint_contract(quant_formats=None):
                 # Packed W4 halves K; per-row scales are flat (out,).
                 quant_contract[name] = (out_f, in_f // 2)
                 quant_contract[stem + ".weight_scale"] = (out_f,)
+            elif fmt == "asym_w4a8_int8":
+                # Packed W4 halves K; fp8 per-group scales (group 16) + fp32
+                # per-channel + Lloyd-Max codebook.
+                quant_contract[name] = (out_f, in_f // 2)
+                quant_contract[stem + ".weight_s_rel"] = (out_f, in_f // 16)
+                quant_contract[stem + ".weight_s_channel"] = (out_f,)
+                quant_contract[stem + ".weight_codebook"] = (16,)
             else:
                 quant_contract[name] = shape
                 quant_contract[stem + ".weight_scale"] = (out_f, 1)
@@ -124,6 +131,12 @@ def _expected_storage_dtype(name, variant, quantized, quant_weight_stems):
         if name.endswith(".comfy_quant"):
             return "U8"
         if name.endswith(".weight_scale"):
+            return "F32"
+        if name.endswith(".weight_s_rel"):
+            return "F8_E4M3"
+        if name.endswith(".weight_s_channel"):
+            return "F32"
+        if name.endswith(".weight_codebook"):
             return "F32"
         if name.endswith(".weight") and name[: -len(".weight")] in quant_weight_stems:
             return "I8"

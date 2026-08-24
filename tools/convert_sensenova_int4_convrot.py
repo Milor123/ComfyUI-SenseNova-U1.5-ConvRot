@@ -18,6 +18,7 @@ from safetensors.torch import save_file
 
 from comfy_kitchen.backends.eager.convrot_w4a4 import _build_hadamard
 from comfy_kitchen.tensor.convrot_w4a4 import TensorCoreConvRotW4A4Layout
+from comfy_kitchen.tensor.w4a8_int8 import AsymW4A8Int8Layout
 
 # Mirrors sensenova_u15/loader.py::_is_quant_candidate policy.
 _EXCLUDED = ("norm", "embed_tokens", "lm_head")
@@ -91,16 +92,17 @@ def main():
     parser.add_argument("--linear-dtype", choices=["int4", "int8"], default="int4",
                         help="MMA accumulation precision for w4a4 layers (activations are "
                              "always int4 in this format)")
-    parser.add_argument("--mode", choices=["mixed", "all-w4a4"], default="mixed",
+    parser.add_argument("--mode", choices=["mixed", "all-w4a4", "w4a8"], default="mixed",
                         help="mixed: o_proj/down_proj + fm embedders at convrot int8, "
-                             "rest at w4a4 (official quality recipe). all-w4a4: everything int4.")
+                             "rest at w4a4 (official quality recipe). all-w4a4: everything int4. "
+                             "w4a8: everything as asym_w4a8_int8 (4-bit weights, REAL int8 activations).")
     args = parser.parse_args()
 
     device = torch.device(args.device)
     dst = Path(args.output)
 
     out = {}
-    counts = {"w4a4": 0, "int8": 0, "copy": 0}
+    counts = {"w4a4": 0, "int8": 0, "w4a8": 0, "copy": 0}
     n_total = 0
     for key, tensor in _iter_tensors(args.input):
         n_total += 1
@@ -115,7 +117,24 @@ def main():
             any(tok in key for tok in _INT8_STEMS)
             or any(key.startswith(pfx) for pfx in _INT8_EMBEDDERS)
         )
-        if use_int8:
+        if args.mode == "w4a8":
+            qdata, params = AsymW4A8Int8Layout.quantize(
+                w, group_size=16, convrot_groupsize=args.convrot_groupsize,
+                symmetric=True, scale_dtype=torch.float8_e4m3fn, codebook=True,
+                stochastic_rounding=0,
+            )
+            conf = {
+                "format": "asym_w4a8_int8",
+                "group_size": 16,
+                "convrot_groupsize": args.convrot_groupsize,
+            }
+            out[stem + ".weight"] = qdata.to("cpu")
+            out[stem + ".weight_s_rel"] = params.scale.to("cpu")
+            out[stem + ".weight_s_channel"] = params.s_channel.to("cpu").to(torch.float32)
+            if params.codebook is not None:
+                out[stem + ".weight_codebook"] = params.codebook.to("cpu").to(torch.float32)
+            fmt_key = "w4a8"
+        elif use_int8:
             qdata, scale = _quantize_int8_convrot(w, args.convrot_groupsize, device)
             conf = {
                 "format": "int8_tensorwise",

@@ -59,6 +59,24 @@ def make_sensenova_quant_ops():
 
             fmt = getattr(self, "quant_format", None)
             if isinstance(weight, QuantizedTensor):
+                if fmt == "asym_w4a8_int8":
+                    # TRUE W4A8: 4-bit weights, int8 runtime activations.
+                    # Eager forced for the same consistency reason as w4a4.
+                    from comfy_kitchen.backends.eager.w4a8_int8 import (
+                        w4a8_int8_linear as eager_w4a8,
+                    )
+                    from comfy_kitchen.tensor.w4a8_int8 import AsymW4A8Int8Layout
+
+                    qdata, s_rel, s_ch, corr, cb = AsymW4A8Int8Layout.get_plain_tensors(weight)
+                    out = eager_w4a8(
+                        input, qdata, s_rel, s_ch,
+                        codebook=cb, correction=corr, bias=bias,
+                        group_size=int(getattr(weight._params, "group_size", 16)),
+                        convrot_groupsize=gs,
+                        out_dtype=input.dtype,
+                    )
+                    _warn_nan(getattr(self, "_sensenova_name", "?"), "w4a8 eager", out)
+                    return out
                 if fmt == "convrot_w4a4":
                     # Kitchen's W4A4 linear rotates activations internally.
                     # The EAGER implementation is forced deliberately: the CUDA
@@ -95,7 +113,8 @@ def make_sensenova_quant_ops():
                 qdata, scale = TensorWiseINT8Layout.get_plain_tensors(weight)
                 weight_float = qdata.to(input.dtype) * scale.to(input.dtype).reshape(-1, 1)
                 return torch.nn.functional.linear(_rotate_input(input, gs), weight_float, bias)
-            if fmt == "convrot_w4a4":
+            if fmt == "convrot_w4a4" or fmt == "asym_w4a8_int8":
+                # Both kitchen formats dequantize back to the ORIGINAL basis.
                 return torch.nn.functional.linear(input, weight, bias)
             return torch.nn.functional.linear(_rotate_input(input, gs), weight, bias)
 
