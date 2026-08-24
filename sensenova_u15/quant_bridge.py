@@ -68,11 +68,17 @@ def make_sensenova_quant_ops():
             # MANUALLY from raw qdata/scales: QuantizedTensor.dequantize()
             # dispatch is unreliable on CPU in current builds (wrong results
             # or native crashes) and weight streaming hits CPU constantly.
-            weight_float = weight
+            #
+            # Float materializations differ per format: comfy's int8 dequant
+            # keeps the ROTATED basis (input must rotate), while kitchen's
+            # w4a4 dequant already restores the ORIGINAL basis (plain linear).
             if isinstance(weight, QuantizedTensor):
                 qdata, scale = TensorWiseINT8Layout.get_plain_tensors(weight)
                 weight_float = qdata.to(input.dtype) * scale.to(input.dtype).reshape(-1, 1)
-            return torch.nn.functional.linear(_rotate_input(input, gs), weight_float, bias)
+                return torch.nn.functional.linear(_rotate_input(input, gs), weight_float, bias)
+            if fmt == "convrot_w4a4":
+                return torch.nn.functional.linear(input, weight, bias)
+            return torch.nn.functional.linear(_rotate_input(input, gs), weight, bias)
 
     class Ops(base):
         Linear = _Linear
