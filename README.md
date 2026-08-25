@@ -1,5 +1,7 @@
 # Comfyui-SenseNova-U1.5-Wrapper-T8 (ConvRot Quantization Fork)
 
+![SenseNova U1.5 edit workflow in ComfyUI](docs/images/banner.png)
+
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Models](https://img.shields.io/badge/%F0%9F%A4%97-Weights-yellow)](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8)
 [![Upstream](https://img.shields.io/badge/upstream-T8mars-8A2BE2)](https://github.com/T8mars/Comfyui-SenseNova-U1.5-Wrapper-T8)
