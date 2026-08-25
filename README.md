@@ -24,7 +24,7 @@ All upstream features are retained: text-to-image, single-image edit, 1-10 refer
 Clone into `ComfyUI/custom_nodes/`:
 
 ```bash
-git clone https://github.com/Milor123/Comfyui-SenseNova-U1.5-Wrapper-T8.git
+git clone https://github.com/Milor123/ComfyUI-SenseNova-U1.5-ConvRot.git
 ```
 
 Requires ComfyUI with **comfy-kitchen >= 0.2.31**. Download quantized weights from the [model repo](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8) into `ComfyUI/models/diffusion_models/SenseNovaU1.5/`.
