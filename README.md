@@ -10,6 +10,14 @@ Native ComfyUI nodes for **SenseNova-U1.5-8B-MoT** (any-to-any: text-to-image, s
 
 **Quantized weights live here:** [Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8)
 
+## Models & downloads
+
+| Download | Size | Place it in |
+|---|---|---|
+| [SenseNova-U1.5-8B-MoT-T8-hybw4a8-L18-41.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/SenseNova-U1.5-8B-MoT-T8-hybw4a8-L18-41.safetensors) | 13.80 GiB | `ComfyUI/models/diffusion_models/SenseNovaU1.5/` |
+| [SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors) | 17.58 GiB | `ComfyUI/models/diffusion_models/SenseNovaU1.5/` |
+| [SenseNova-U1.5-8B-MoT-LoRA-8step-ComfyUI.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/Loras/SenseNova-U1.5-8B-MoT-LoRA-8step-ComfyUI.safetensors) | 0.76 GiB | `ComfyUI/models/loras/` |
+
 ## What this fork adds
 
 - **ConvRot-aware quantized inference** (`sensenova_u15/quant_bridge.py`): explicit activation rotation + manual dequantization for INT8 ConvRot, and comfy-kitchen kernel routing for W4A4 / W4A8 — ComfyUI's generic dispatch silently skips the rotation these checkpoints require.
