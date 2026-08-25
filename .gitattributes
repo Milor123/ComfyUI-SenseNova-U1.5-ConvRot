@@ -1,0 +1,7 @@
+# The tokenizer assets are SHA256-pinned in sensenova_u15/loader.py
+# (TOKENIZER_ASSET_SHA256) and verified on every load. Their bytes must survive
+# checkout unchanged, so EOL conversion must never be applied to them --
+# otherwise a clone made with core.autocrlf=true (the Git for Windows default)
+# rewrites them to CRLF and load_sensenova_clip() fails with
+# "SenseNova-U1.5 tokenizer asset digest mismatch".
+sensenova_u15/tokenizer/** -text
