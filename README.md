@@ -15,7 +15,7 @@ Native ComfyUI nodes for **SenseNova-U1.5-8B-MoT** (any-to-any: text-to-image, s
 | Download | Size | Place it in |
 |---|---|---|
 | [SenseNova-U1.5-8B-MoT-T8-hybw4a8-L18-41.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/SenseNova-U1.5-8B-MoT-T8-hybw4a8-L18-41.safetensors) | 13.80 GiB | `ComfyUI/models/diffusion_models/SenseNovaU1.5/` |
-| [SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors) | 17.58 GiB | `ComfyUI/models/diffusion_models/SenseNovaU1.5/` |
+| [SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/SenseNova-U1.5-8B-MoT-T8-int8-convrot-tagged.safetensors) — **recommended** | 17.58 GiB | `ComfyUI/models/diffusion_models/SenseNovaU1.5/` |
 | [SenseNova-U1.5-8B-MoT-LoRA-8step-ComfyUI.safetensors](https://huggingface.co/Milor123/ComfyUI-ConvRot-SenseNova-U1.5-8B-MoT-T8/resolve/main/Loras/SenseNova-U1.5-8B-MoT-LoRA-8step-ComfyUI.safetensors) | 0.76 GiB | `ComfyUI/models/loras/` |
 
 ## What this fork adds
@@ -42,6 +42,10 @@ Requires ComfyUI with **comfy-kitchen >= 0.2.31**. Download quantized weights fr
 ## Quantization findings
 
 This model tolerates W4A8 activation quantization in its later transformer layers but **not in its earliest ones**: the hybrid release anchors layers 0-17 in INT8 (bf16 activations) and runs layers 18-41 in W4A8. The boundary was located empirically with a bisect ladder of hybrid checkpoints. See the model card for measured numbers (INT8: 0.43% pixel diff vs bf16; hybrid: visually indistinguishable in same-seed A/B).
+
+## Performance
+
+On an RTX 4070 12 GB, both the INT8 and the hybrid W4A8 variants run surprisingly fast even though the model exceeds VRAM: ComfyUI streams weights on demand, and the quantized formats move 3-4x fewer bytes per step while computing through fast integer tensor-core kernels — so the overflow never turns into a slowdown. bf16 is a different story: it streams ~47 GB per step and feels drastically slower.
 
 ## Credits
 
