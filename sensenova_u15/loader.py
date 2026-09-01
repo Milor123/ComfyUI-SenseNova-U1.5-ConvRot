@@ -1,16 +1,26 @@
 import hashlib
 from pathlib import Path
 
+import comfy.model_management  # type: ignore[import-not-found]
+import comfy.model_patcher  # type: ignore[import-not-found]
+import comfy.sd  # type: ignore[import-not-found]
+import comfy.utils  # type: ignore[import-not-found]
 import torch
 from safetensors import safe_open
 
-import comfy.model_management
-import comfy.model_patcher
-import comfy.sd
-import comfy.utils
-
 from .model import NUM_LAYERS
 from .model_config import SenseNovaModelConfig
+
+
+def _ensure_qt_guards():
+    try:
+        from ..qt_guards import install_quant_guards  # type: ignore[import-not-found]
+
+        install_quant_guards()
+    except Exception as e:
+        import logging
+
+        logging.debug(f"[sensenova-u15] qt guards lazy install skipped: {e}")
 
 
 CONFIG_SHA256 = "6497591f64cb0dd6917fbb10c0cd13024e5817179a9aa3700998eb137a553d6b"
@@ -18,6 +28,8 @@ MODEL_REVISION = "1f6ec60423d29939dde4202fd82ae340b144e280"
 MODEL_REPO = "sensenova/SenseNova-U1.5-8B-MoT"
 SFT_MODEL_REVISION = "661834c5b5aee0f89958353511d6ac0ccaacb646"
 SFT_MODEL_REPO = "sensenova/SenseNova-U1.5-8B-MoT-SFT"
+# Compat alias for older lora.py that imports FINAL_MODEL_REVISIONS
+FINAL_MODEL_REVISIONS = (MODEL_REVISION, "19bc874ef6ffc97fda9837b40fc1d1301806158a")
 MODEL_FORMAT = "sensenova-u1.5-mot"
 MODEL_VARIANTS = {
     "final": {
@@ -41,9 +53,13 @@ TOKENIZER_ASSET_SHA256 = {
 
 def _validate_metadata(metadata):
     if metadata.get("format") != MODEL_FORMAT:
-        raise ValueError("SenseNova-U1.5 checkpoint format does not match this node version")
+        raise ValueError(
+            "SenseNova-U1.5 checkpoint format does not match this node version"
+        )
     if metadata.get("config_sha256") != CONFIG_SHA256:
-        raise ValueError("SenseNova-U1.5 config digest does not match this node version")
+        raise ValueError(
+            "SenseNova-U1.5 config digest does not match this node version"
+        )
     source_repo = metadata.get("source_repo")
     source_revision = metadata.get("source_revision")
     for variant, contract in MODEL_VARIANTS.items():
@@ -148,15 +164,17 @@ def _storage_dtype(name, variant="final"):
         return "BF16"
     if variant != "final":
         raise ValueError(f"unsupported SenseNova-U1.5 checkpoint variant: {variant}")
-    if name.startswith((
-        "fm_modules.vision_model_mot_gen.",
-        "fm_modules.timestep_embedder.",
-        "fm_modules.noise_scale_embedder.",
-    )):
+    if name.startswith(
+        (
+            "fm_modules.vision_model_mot_gen.",
+            "fm_modules.timestep_embedder.",
+            "fm_modules.noise_scale_embedder.",
+        )
+    ):
         return "F32"
     layer_prefix = "language_model.model.layers."
     if name.startswith(layer_prefix) and "_mot_gen" in name:
-        layer = int(name[len(layer_prefix):].split(".", 1)[0])
+        layer = int(name[len(layer_prefix) :].split(".", 1)[0])
         if layer < NUM_LAYERS - 3:
             return "F32"
     return "BF16"
@@ -186,8 +204,12 @@ def _validate_checkpoint_header(checkpoint):
         tensor = checkpoint.get_slice(name)
         actual_shape = tuple(tensor.get_shape())
         if shape is not None and actual_shape != shape:
-            raise ValueError(f"SenseNova-U1.5 checkpoint shape mismatch for {name}: {actual_shape} != {shape}")
-        expected_dtype = _expected_storage_dtype(name, variant, quantized, quant_weight_stems)
+            raise ValueError(
+                f"SenseNova-U1.5 checkpoint shape mismatch for {name}: {actual_shape} != {shape}"
+            )
+        expected_dtype = _expected_storage_dtype(
+            name, variant, quantized, quant_weight_stems
+        )
         if tensor.get_dtype() != expected_dtype:
             raise ValueError(
                 f"SenseNova-U1.5 checkpoint dtype mismatch for {name}: {tensor.get_dtype()} != {expected_dtype}"
@@ -199,12 +221,15 @@ def _validate_tokenizer_assets():
     asset_dir = Path(__file__).resolve().parent / "tokenizer"
     for name, expected in TOKENIZER_ASSET_SHA256.items():
         path = asset_dir / name
-        digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        digest = (
+            hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        )
         if digest != expected:
             raise ValueError(f"SenseNova-U1.5 tokenizer asset digest mismatch: {name}")
 
 
 def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False):
+    _ensure_qt_guards()
     if Path(model_path).suffix.lower() not in (".safetensors", ".sft"):
         raise ValueError("SenseNova-U1.5 loader accepts safetensors files only")
     with safe_open(model_path, framework="pt", device="cpu") as checkpoint:
@@ -214,7 +239,9 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
     if loaded_variant != variant:
         raise ValueError("SenseNova-U1.5 checkpoint metadata changed while loading")
     if set(state_dict) != expected_keys:
-        raise ValueError("SenseNova-U1.5 loaded state dict does not match the validated header")
+        raise ValueError(
+            "SenseNova-U1.5 loaded state dict does not match the validated header"
+        )
 
     load_device = comfy.model_management.get_torch_device()
     model_config = SenseNovaModelConfig({})
@@ -224,9 +251,15 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
     model_config.set_inference_dtype(dtype, manual_cast_dtype, device=load_device)
 
     parameters = comfy.utils.calculate_parameters(state_dict)
-    initial_load_device = comfy.model_management.unet_inital_load_device(parameters, dtype)
+    initial_load_device = comfy.model_management.unet_inital_load_device(
+        parameters, dtype
+    )
     model = model_config.get_model(state_dict, device=initial_load_device)
-    patcher_class = comfy.model_patcher.ModelPatcher if disable_dynamic else comfy.model_patcher.CoreModelPatcher
+    patcher_class = (
+        comfy.model_patcher.ModelPatcher
+        if disable_dynamic
+        else comfy.model_patcher.CoreModelPatcher
+    )
     patcher = patcher_class(
         model,
         load_device=load_device,
@@ -234,7 +267,9 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
     )
     model.load_model_weights(state_dict, assign=patcher.is_dynamic())
     if state_dict:
-        raise ValueError(f"SenseNova-U1.5 unused checkpoint keys after load: {sorted(state_dict)[:5]}")
+        raise ValueError(
+            f"SenseNova-U1.5 unused checkpoint keys after load: {sorted(state_dict)[:5]}"
+        )
     patcher.cached_patcher_init = (load_sensenova_model, (model_path, dtype))
     patcher.set_attachments(
         "sensenova_checkpoint",
@@ -248,6 +283,7 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
 
 
 def load_sensenova_clip():
+    _ensure_qt_guards()
     _validate_tokenizer_assets()
     target = SenseNovaModelConfig({}).clip_target()
     return comfy.sd.CLIP(target, parameters=0, state_dict=[])

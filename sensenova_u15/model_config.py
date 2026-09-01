@@ -100,6 +100,11 @@ class SenseNovaModelConfig(comfy.supported_models_base.BASE):
     optimizations = {"fp8": False}
 
     def get_model(self, state_dict, prefix="", device=None):
+        try:
+            from ..qt_guards import install_quant_guards  # type: ignore[import-not-found]
+            install_quant_guards()
+        except Exception:
+            pass
         import os
 
         if any(key.endswith(".comfy_quant") for key in state_dict) and not os.environ.get(
