@@ -12,15 +12,60 @@ from .model import NUM_LAYERS
 from .model_config import SenseNovaModelConfig
 
 
-def _ensure_qt_guards():
-    try:
-        from ..qt_guards import install_quant_guards  # type: ignore[import-not-found]
+_qt_guards = None
 
-        install_quant_guards()
-    except Exception as e:
-        import logging
 
-        logging.debug(f"[sensenova-u15] qt guards lazy install skipped: {e}")
+def _get_qt_guards():
+    """Import the sibling top-level qt_guards module, whatever the parent
+    package is called on this install (ComfyUI sanitizes folder names)."""
+    global _qt_guards
+    if _qt_guards is None:
+        try:
+            import importlib
+
+            parent = __package__.rsplit(".", 1)[0]
+            _qt_guards = importlib.import_module(".qt_guards", parent)
+        except Exception:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            import qt_guards as _mod
+
+            _qt_guards = _mod
+    return _qt_guards
+
+
+def _make_sensenova_patcher_class(disable_dynamic):
+    """Patcher subclass that activates the quant guards only while moving
+    SenseNova weights.
+
+    ComfyUI passes an explicit dtype to model weights in exactly two patcher
+    methods (``patch_weight_to_device`` for LoRA patches and
+    ``patch_hook_weight_to_device`` for hooks). Wrapping only those with
+    ``sensenova_quant_scope()`` keeps the guards inert for every other model
+    in the process, so quantized text encoders from other nodes (MiniMax H3,
+    Flux2 Klein) keep ComfyUI's native dtype handling in the same session.
+    """
+    guards = _get_qt_guards()
+    guards.install_quant_guards()
+    sensenova_quant_scope = guards.sensenova_quant_scope
+
+    base_class = (
+        comfy.model_patcher.ModelPatcher
+        if disable_dynamic
+        else comfy.model_patcher.CoreModelPatcher
+    )
+
+    class SenseNovaModelPatcher(base_class):
+        def patch_weight_to_device(self, *args, **kwargs):
+            with sensenova_quant_scope():
+                return super().patch_weight_to_device(*args, **kwargs)
+
+        def patch_hook_weight_to_device(self, *args, **kwargs):
+            with sensenova_quant_scope():
+                return super().patch_hook_weight_to_device(*args, **kwargs)
+
+    return SenseNovaModelPatcher
 
 
 CONFIG_SHA256 = "6497591f64cb0dd6917fbb10c0cd13024e5817179a9aa3700998eb137a553d6b"
@@ -229,7 +274,6 @@ def _validate_tokenizer_assets():
 
 
 def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False):
-    _ensure_qt_guards()
     if Path(model_path).suffix.lower() not in (".safetensors", ".sft"):
         raise ValueError("SenseNova-U1.5 loader accepts safetensors files only")
     with safe_open(model_path, framework="pt", device="cpu") as checkpoint:
@@ -255,11 +299,7 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
         parameters, dtype
     )
     model = model_config.get_model(state_dict, device=initial_load_device)
-    patcher_class = (
-        comfy.model_patcher.ModelPatcher
-        if disable_dynamic
-        else comfy.model_patcher.CoreModelPatcher
-    )
+    patcher_class = _make_sensenova_patcher_class(disable_dynamic)
     patcher = patcher_class(
         model,
         load_device=load_device,
@@ -283,7 +323,6 @@ def load_sensenova_model(model_path, dtype=torch.bfloat16, disable_dynamic=False
 
 
 def load_sensenova_clip():
-    _ensure_qt_guards()
     _validate_tokenizer_assets()
     target = SenseNovaModelConfig({}).clip_target()
     return comfy.sd.CLIP(target, parameters=0, state_dict=[])
