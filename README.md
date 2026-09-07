@@ -27,7 +27,7 @@ Native ComfyUI nodes for **SenseNova-U1.5-8B-MoT** (any-to-any: text-to-image, s
 - **INT4 converter** (`tools/convert_sensenova_int4_convrot.py`): self-contained W4A4 / W4A8 / mixed-mode converter built directly on comfy-kitchen layouts, with sequential (mmap-free) reads for large files.
 - **Headless test harness** (`tests/headless/`): capture, compare, first-divergence and validation scripts used to debug quantization numerically without launching the ComfyUI UI.
 
-All upstream features are retained: text-to-image, single-image edit, 1-10 reference-image editing, 1-16 outputs per prompt, standard `KSampler`, U1.5 Final and SFT weights, the official 8-step speed LoRA, three-path `img_cfg` guidance, CFG Norm, and structured edit prompts. Workflows live in `examples/`.
+All upstream features are retained: text-to-image, single-image edit, 1-10 reference-image editing, 1-16 outputs per prompt, standard `KSampler`, U1.5 Final and SFT weights, the official 8-step speed LoRA, three-path `img_cfg` guidance, CFG Norm, and structured edit prompts. Workflows live in `examples/`: `result-t2i-8step-2048.json` is the maintained example for this fork; original upstream workflows are archived in `examples/old examples (without my nodes)/` for reference.
 
 ## Install
 
