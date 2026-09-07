@@ -1,0 +1,95 @@
+{
+  "id": "6e74ae7a-1fe6-4b80-991f-1e0efe583003",
+  "revision": 0,
+  "last_node_id": 15,
+  "last_link_id": 20,
+  "nodes": [
+    {
+      "id": 1, "type": "SenseNovaU15Loader", "pos": [0, 0], "size": [330, 90], "flags": {}, "order": 0, "mode": 0, "inputs": [],
+      "outputs": [{"name": "MODEL", "type": "MODEL", "links": [1]}, {"name": "CLIP", "type": "CLIP", "links": [2, 3]}, {"name": "VAE", "type": "VAE", "links": [4]}],
+      "properties": {"Node name for S&R": "SenseNovaU15Loader"}, "widgets_values": ["SenseNova-U1.5-8B-MoT-T8.safetensors"]
+    },
+    {
+      "id": 2, "type": "SenseNovaSamplingOptions", "pos": [390, 0], "size": [300, 90], "flags": {}, "order": 1, "mode": 0,
+      "inputs": [{"name": "model", "type": "MODEL", "link": 1}], "outputs": [{"name": "MODEL", "type": "MODEL", "links": [10, 14]}],
+      "properties": {"Node name for S&R": "SenseNovaSamplingOptions"}, "widgets_values": [3]
+    },
+    {
+      "id": 3, "type": "LoadImage", "pos": [0, 130], "size": [300, 300], "flags": {}, "order": 2, "mode": 0, "inputs": [],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [7]}, {"name": "MASK", "type": "MASK", "links": null}],
+      "properties": {"Node name for S&R": "LoadImage"}, "widgets_values": ["example.png", "image"]
+    },
+    {
+      "id": 4, "type": "LoadImage", "pos": [320, 130], "size": [300, 300], "flags": {}, "order": 3, "mode": 0, "inputs": [],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [8]}, {"name": "MASK", "type": "MASK", "links": null}],
+      "properties": {"Node name for S&R": "LoadImage"}, "widgets_values": ["测试素材1.jpeg", "image"]
+    },
+    {
+      "id": 5, "type": "CLIPTextEncode", "pos": [640, 120], "size": [430, 180], "flags": {}, "order": 4, "mode": 0,
+      "inputs": [{"name": "clip", "type": "CLIP", "link": 2}], "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING", "links": [5]}],
+      "properties": {"Node name for S&R": "CLIPTextEncode"}, "widgets_values": ["【主要修改】让 Image-1 中的人物穿上 Image-2 中的服装，服装的黑白配色、白色围裙、荷叶边、蝴蝶结和袖口细节必须准确。\n\n【参考图职责】Image-1 只提供人物身份、脸部、发型、姿势、镜头和背景；Image-2 只提供服装款式与材质，不要复制人台和陈列背景。\n\n【必须保持】保持 Image-1 的脸、五官、发型、手部姿势、光线、室内背景和竖幅构图不变。\n\n【禁止出现】不要改变人物身份，不要增加第二个人，不要出现人台、鸟笼、花束、文字或水印。\n\n【执行要求】只修改上面明确指定的服装区域；未要求修改的区域保持原图一致。"]
+    },
+    {
+      "id": 6, "type": "CLIPTextEncode", "pos": [640, 350], "size": [430, 110], "flags": {}, "order": 5, "mode": 0,
+      "inputs": [{"name": "clip", "type": "CLIP", "link": 3}], "outputs": [{"name": "CONDITIONING", "type": "CONDITIONING", "links": [6, 13]}],
+      "properties": {"Node name for S&R": "CLIPTextEncode"}, "widgets_values": [""]
+    },
+    {
+      "id": 7, "type": "SenseNovaReferenceImage", "pos": [1050, 120], "size": [350, 160], "flags": {}, "order": 6, "mode": 0,
+      "inputs": [{"name": "positive", "type": "CONDITIONING", "link": 5}, {"name": "negative", "type": "CONDITIONING", "link": 6}, {"label": "参考图 1 (Image-1)", "localized_name": "参考图 1 (Image-1)", "name": "Image-1", "type": "IMAGE", "link": 7}, {"label": "参考图 2 (Image-2)", "localized_name": "参考图 2 (Image-2)", "name": "Image-2", "type": "IMAGE", "link": 8}],
+      "outputs": [{"name": "positive", "type": "CONDITIONING", "links": [9]}, {"name": "image_condition", "type": "CONDITIONING", "links": [11]}],
+      "properties": {"Node name for S&R": "SenseNovaReferenceImage"}, "widgets_values": []
+    },
+    {
+      "id": 8, "type": "SenseNovaEditGuider", "pos": [1050, 330], "size": [330, 190], "flags": {}, "order": 7, "mode": 0,
+      "inputs": [{"name": "model", "type": "MODEL", "link": 10}, {"name": "positive", "type": "CONDITIONING", "link": 9}, {"name": "image_condition", "type": "CONDITIONING", "link": 11}, {"name": "negative", "type": "CONDITIONING", "link": 13}],
+      "outputs": [{"name": "GUIDER", "type": "GUIDER", "links": [12]}], "properties": {"Node name for S&R": "SenseNovaEditGuider"}, "widgets_values": [4, 1, "global", 0, 1]
+    },
+    {
+      "id": 9, "type": "RandomNoise", "pos": [0, 520], "size": [260, 90], "flags": {}, "order": 8, "mode": 0, "inputs": [],
+      "outputs": [{"name": "NOISE", "type": "NOISE", "links": [15]}], "properties": {"Node name for S&R": "RandomNoise"}, "widgets_values": [42, "fixed"]
+    },
+    {
+      "id": 10, "type": "KSamplerSelect", "pos": [0, 650], "size": [260, 70], "flags": {}, "order": 9, "mode": 0, "inputs": [],
+      "outputs": [{"name": "SAMPLER", "type": "SAMPLER", "links": [16]}], "properties": {"Node name for S&R": "KSamplerSelect"}, "widgets_values": ["euler"]
+    },
+    {
+      "id": 11, "type": "BasicScheduler", "pos": [280, 510], "size": [300, 130], "flags": {}, "order": 10, "mode": 0,
+      "inputs": [{"name": "model", "type": "MODEL", "link": 14}], "outputs": [{"name": "SIGMAS", "type": "SIGMAS", "links": [17]}],
+      "properties": {"Node name for S&R": "BasicScheduler"}, "widgets_values": ["normal", 50, 1]
+    },
+    {
+      "id": 12, "type": "EmptySenseNovaLatentImage", "pos": [280, 660], "size": [280, 130], "flags": {}, "order": 11, "mode": 0, "inputs": [],
+      "outputs": [{"name": "LATENT", "type": "LATENT", "links": [18]}], "properties": {"Node name for S&R": "EmptySenseNovaLatentImage"}, "widgets_values": [2048, 2048, 1]
+    },
+    {
+      "id": 13, "type": "SamplerCustomAdvanced", "pos": [600, 510], "size": [260, 160], "flags": {}, "order": 12, "mode": 0,
+      "inputs": [{"name": "noise", "type": "NOISE", "link": 15}, {"name": "guider", "type": "GUIDER", "link": 12}, {"name": "sampler", "type": "SAMPLER", "link": 16}, {"name": "sigmas", "type": "SIGMAS", "link": 17}, {"name": "latent_image", "type": "LATENT", "link": 18}],
+      "outputs": [{"name": "output", "type": "LATENT", "links": [19]}, {"name": "denoised_output", "type": "LATENT", "links": null}],
+      "properties": {"Node name for S&R": "SamplerCustomAdvanced"}, "widgets_values": []
+    },
+    {
+      "id": 14, "type": "VAEDecode", "pos": [880, 530], "size": [220, 70], "flags": {}, "order": 13, "mode": 0,
+      "inputs": [{"name": "samples", "type": "LATENT", "link": 19}, {"name": "vae", "type": "VAE", "link": 4}],
+      "outputs": [{"name": "IMAGE", "type": "IMAGE", "links": [20]}], "properties": {"Node name for S&R": "VAEDecode"}, "widgets_values": []
+    },
+    {
+      "id": 15, "type": "SaveImage", "pos": [1120, 500], "size": [310, 270], "flags": {}, "order": 14, "mode": 0,
+      "inputs": [{"name": "images", "type": "IMAGE", "link": 20}], "outputs": [{"name": "images", "type": "IMAGE", "links": null}],
+      "properties": {"Node name for S&R": "SaveImage"}, "widgets_values": ["SenseNova/stable-garment-edit"]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "MODEL"], [2, 1, 1, 5, 0, "CLIP"], [3, 1, 1, 6, 0, "CLIP"], [4, 1, 2, 14, 1, "VAE"],
+    [5, 5, 0, 7, 0, "CONDITIONING"], [6, 6, 0, 7, 1, "CONDITIONING"], [7, 3, 0, 7, 2, "IMAGE"], [8, 4, 0, 7, 3, "IMAGE"],
+    [9, 7, 0, 8, 1, "CONDITIONING"], [10, 2, 0, 8, 0, "MODEL"], [11, 7, 1, 8, 2, "CONDITIONING"], [12, 8, 0, 13, 1, "GUIDER"],
+    [13, 6, 0, 8, 3, "CONDITIONING"], [14, 2, 0, 11, 0, "MODEL"], [15, 9, 0, 13, 0, "NOISE"], [16, 10, 0, 13, 2, "SAMPLER"],
+    [17, 11, 0, 13, 3, "SIGMAS"], [18, 12, 0, 13, 4, "LATENT"], [19, 13, 0, 14, 0, "LATENT"], [20, 14, 0, 15, 0, "IMAGE"]
+  ],
+  "groups": [
+    {"id": 1, "title": "1. Image-1 is the person; Image-2 is the garment", "bounding": [-30, -70, 750, 550], "color": "#3f789e", "flags": {}},
+    {"id": 2, "title": "2. Structured prompt + stable global CFG norm", "bounding": [610, 60, 820, 480], "color": "#3f789e", "flags": {}},
+    {"id": 3, "title": "3. Native sampling, decode and save", "bounding": [-30, 470, 1490, 370], "color": "#3f789e", "flags": {}}
+  ],
+  "config": {}, "extra": {"ds": {"scale": 0.7, "offset": [30, 80]}, "frontendVersion": "1.48.7"}, "version": 0.4
+}
